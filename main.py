@@ -59,7 +59,8 @@ def extract_text_from_file(uploaded_file):
 
 # Generate analysis prompt
 def generate_prompt(resume_text, job_role=None):
-    base_prompt = """Please analyze this resume and provide detailed feedback using EXACTLY the following format:
+    base_prompt = """Please analyze this resume and provide honest feedback only for mentioned {role} using EXACTLY the following format:
+    if resume not suitable for mentioned {role}, give low rating.
 
 ### Key Strengths
 - [Your strength 1]
