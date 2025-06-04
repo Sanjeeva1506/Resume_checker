@@ -1,0 +1,172 @@
+/* Inherit main theme variables */
+:root {
+    --primary: #2c3e50;
+    --secondary: #1e293b;
+    --accent: #4CAF50;
+    --text: #f0f2f6;
+    --card: #1e293b;
+}
+
+.stApp {
+    background-color: #0f172a;
+    color: var(--text);
+}
+
+/* Job card styling */
+.job-card {
+    background: var(--card);
+    border-radius: 10px;
+    padding: 20px;
+    margin: 15px 0;
+    border-left: 4px solid var(--accent);
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    color: #000000;
+
+}
+
+.job-card h3 {
+    color: var(--accent);
+    margin-top: 0;
+    --text: #000000;
+
+}
+
+.job-card .company {
+    font-weight: bold;
+    margin-bottom: 5px;
+    --text: #000000;
+
+}
+
+.job-card .location {
+    color: #a5a5a5;
+    font-size: 0.9em;
+    margin-bottom: 15px;
+    --text: #000000;
+
+}
+
+.apply-button {
+    display: inline-block;
+    background-color: var(--accent);
+    color: rgb(0, 0, 0) !important;
+    padding: 8px 16px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: bold;
+    transition: background-color 0.3s;
+}
+
+.apply-button:hover {
+    background-color: #3e8e41;
+    color: rgb(0, 0, 0);
+}
+
+/* Inherit button styles */
+.stButton>button {
+    background-color: var(--accent);
+    color: white;
+    border-radius: 8px;
+    padding: 10px 24px;
+    font-weight: bold;
+    border: none;
+}
+
+.stButton>button:hover {
+    background-color: #3e8e41;
+    color: rgb(0, 0, 0);
+}
+
+/* Inherit text input styles */
+.stTextInput>div>div>input {
+    background-color: var(--secondary) !important;
+    color: var(--text) !important;
+    border-color: #4b5563 !important;
+}
+
+body {
+    font-family: 'Segoe UI', sans-serif;
+    background-color: #000000;
+}
+
+.feedback-card {
+    background-color: #ffffff;
+    padding: 20px;
+    border-radius: 16px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+    margin-bottom: 24px;
+    transition: transform 0.2s ease, box-shadow 0.3s ease;
+    --text: #000000;
+
+}
+
+.feedback-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.1);
+}
+
+.feedback-card h3 {
+    color: #000000;
+    font-size: 22px;
+    margin-bottom: 8px;
+}
+
+.feedback-card p {
+    font-size: 15px;
+    color: #444444;
+    margin: 4px 0;
+    --text: #000000;
+
+}
+
+.feedback-card a {
+    text-decoration: none;
+}
+
+.feedback-card button.stButton {
+    background-color: #2e7d32;
+    color: rgb(0, 0, 0);
+    border: none;
+    padding: 10px 0;
+    font-size: 15px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+    width: 100%;
+    margin-top: 12px;
+}
+
+.feedback-card button.stButton:hover {
+    background-color: #256429;
+}
+
+.job-card {
+    background-color: #f9f9f9;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    --text: #000000;
+
+}
+
+.job-card h4 {
+    color: #1f2937;
+    margin-top: 0;
+    --text: #000000;
+
+}
+
+.apply-btn {
+    background-color: #2563eb;
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+.apply-btn:hover {
+    background-color: #1d4ed8;
+}
