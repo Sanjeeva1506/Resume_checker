@@ -380,55 +380,74 @@ def generate_prompt(resume_text: str, job_role: Optional[str] = None, domain: st
     
     language_note = f"The resume is in {language.upper()}. Provide feedback in the same language." if language != "en" else ""
     
-    base_prompt = f"""Please analyze this resume critically and provide detailed feedback for {job_role if job_role else "general job applications"}. {domain_specific} {language_note}
+    base_prompt = f"""
+You are a professional resume analyst. Critically evaluate the resume provided below and generate **specific, resume-based** feedback for the role of **{job_role if job_role else "general job applications"}**. Incorporate domain expertise and contextual analysis. Do not provide generic advice—tie every point directly to the resume content. {domain_specific} {language_note}
 
 Structure your response EXACTLY as follows:
 
-### Key Strengths (3-5 bullet points)
-- [Strength 1 with specific example from resume]
-- [Strength 2 with specific example]
+---
 
-### Critical Weaknesses (3-5 bullet points)
-- [Weakness 1 with specific improvement suggestion]
-- [Weakness 2 with specific suggestion]
+### ✅ Key Strengths (3–5 bullet points)
+- [Identify and quote or paraphrase strong points from the resume]
+- [Explain why these points are relevant or impressive for {job_role if job_role else "target roles"}]
 
-### Experience Analysis
-- [Relevance to {job_role if job_role else "target roles"}]
-- [Impact quantification - suggest better metrics if missing]
-- [Chronological consistency check]
+### ⚠️ Critical Weaknesses (3–5 bullet points)
+- [Cite exact phrases or sections that are weak, vague, or unconvincing]
+- [Provide precise, actionable rewrite suggestions]
 
-### Section Analysis
-- [Missing sections that should be added]
-- [Sections that need improvement]
+### 📌 Experience Analysis
+- **Relevance to {job_role if job_role else "target roles"}**
+  - [Assess how well the experience aligns with the responsibilities or skills expected]
+- **Impact Quantification**
+  - [Suggest metrics or data points if any bullet lacks measurable outcomes]
+- **Chronological Consistency**
+  - [Call out any missing dates, gaps, or order issues]
 
-### ATS Optimization
-- [Keyword optimization for {job_role if job_role else "target roles"}]
-- [ATS compatibility score 1-100]
-- [Formatting issues affecting ATS]
+### 📂 Section Analysis
+- **Missing Sections**
+  - [State clearly what’s missing — e.g., Skills, Projects, Summary]
+- **Sections Needing Improvement**
+  - [Name specific sections and describe what to improve and how]
 
-### Content Clarity & Impact
-- [Specific phrases to improve]
-- [Suggested power verbs to use]
-- [Quantifiable achievements to highlight]
+### 🤖 ATS Optimization
+- **Keyword Alignment with {job_role if job_role else "target roles"}**
+  - [Identify missing or underused industry-specific terms]
+- **Estimated ATS Score**: [Score out of 100]
+- **ATS Formatting Concerns**
+  - [Highlight tables, columns, fonts, or symbols that may break parsing]
 
-### Soft Skills Detected
-- [List of inferred soft skills with confidence levels]
+### 🧠 Content Clarity & Impact
+- **Phrases to Improve**
+  - [Quote unclear or weak lines and rewrite them]
+- **Suggested Power Verbs**
+  - [List 5–10 stronger action verbs tailored to their experience]
+- **Quantifiable Achievements to Highlight**
+  - [Point out any generic bullets and suggest quantified rewrites]
 
-### Bias Analysis
-- [Potential bias indicators in language or content]
-- [Suggestions for more inclusive language]
+### 🧩 Soft Skills Detected
+- [List inferred soft skills like Leadership, Communication, etc., with confidence levels (High/Medium/Low)]
 
-### Overall Rating (Must be in format "X/10", e.g., "8.5/10")
-[Detailed justification for rating]
+### 🔍 Bias & Inclusion Analysis
+- **Potential Biases**
+  - [Age, gendered language, or location-based exclusions]
+- **Inclusive Language Suggestions**
+  - [Improve tone and neutrality if needed]
 
-### Suggested Role: [Most suitable role based on content]
-[Alternative role suggestions if relevant]
+### ⭐ Overall Rating
+**X/10** (e.g., “8.0/10”)  
+[Give a detailed explanation justifying this score based on resume quality and readiness for {job_role if job_role else "general applications"}]
 
-### Actionable Recommendations (Priority Ordered)
-1. [Highest priority action]
-2. [Next priority action]
+### 🎯 Suggested Role: [Most fitting role based on resume content]
+- **Alternative Roles**: [If applicable]
 
-Resume content:
+### 🛠️ Actionable Recommendations (Priority-Ordered)
+1. [Top priority improvement]
+2. [Second priority improvement]
+3. [Continue if more relevant steps exist]
+
+---
+
+Resume Content:
 {resume_text}"""
     return base_prompt
 
