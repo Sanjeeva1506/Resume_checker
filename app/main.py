@@ -21,6 +21,10 @@ from langdetect import detect
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+import plotly.graph_objects as go
+from typing import List, Dict, Any
+import base64
+from collections import defaultdict
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -223,6 +227,17 @@ if 'language' not in st.session_state:
 if 'domain' not in st.session_state:
     st.session_state.domain = "general"
 
+if 'uploaded_resumes' not in st.session_state:
+    st.session_state.uploaded_resumes = []  # Stores all uploaded resumes
+if 'current_resume_index' not in st.session_state:
+    st.session_state.current_resume_index = 0
+if 'sort_criteria' not in st.session_state:
+    st.session_state.sort_criteria = "upload_time"
+if 'sort_order' not in st.session_state:
+    st.session_state.sort_order = "desc"
+if 'resume_tags' not in st.session_state:
+    st.session_state.resume_tags = defaultdict(list)  # For categorizing resumes
+
 # Error handling decorator
 def handle_errors(func):
     def wrapper(*args, **kwargs):
@@ -256,6 +271,451 @@ def get_groq_client(max_retries: int = 3):
             logger.warning(f"Retry {attempt + 1} after {wait_time} seconds...")
             time.sleep(wait_time)
     return None
+
+# New function to handle multiple file uploads
+def handle_multi_file_upload():
+    """Handle multiple resume uploads and initial processing"""
+    st.markdown("<h3 style='color: var(--accent);'>Upload Multiple Resumes</h3>", unsafe_allow_html=True)
+    
+    uploaded_files = st.file_uploader(
+        "Select multiple resume files (PDF, TXT, or DOCX)",
+        type=["pdf", "txt", "docx"],
+        accept_multiple_files=True,
+        help="Maximum 20 files, 5MB each",
+        key="multi_file_uploader"
+    )
+    
+    if uploaded_files and len(uploaded_files) > 20:
+        st.error("Maximum 20 files allowed. Please select fewer files.")
+        return
+    
+    if st.button("Process Uploaded Resumes", key="process_multiple"):
+        with st.spinner(f"Processing {len(uploaded_files)} resumes..."):
+            successful_uploads = 0
+            for file in uploaded_files:
+                try:
+                    extracted_data = extract_text_from_file(file)
+                    if extracted_data and extracted_data.get("text"):
+                        # Generate a unique ID for each resume
+                        file_id = base64.b64encode(file.name.encode()).decode()[:20]
+                        
+                        st.session_state.uploaded_resumes.append({
+                            "id": file_id,
+                            "name": file.name,
+                            "size": file.size,
+                            "type": file.type,
+                            "upload_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "extracted_data": extracted_data,
+                            "analysis": None,
+                            "tags": [],
+                            "metadata": {
+                                "page_count": extracted_data.get("page_count", 1),
+                                "word_count": len(extracted_data["text"].split()),
+                                "sections": extracted_data.get("sections", [])
+                            }
+                        })
+                        successful_uploads += 1
+                except Exception as e:
+                    logger.error(f"Failed to process {file.name}: {str(e)}")
+            
+            if successful_uploads > 0:
+                st.success(f"Successfully processed {successful_uploads} resumes!")
+                if successful_uploads < len(uploaded_files):
+                    st.warning(f"Failed to process {len(uploaded_files) - successful_uploads} files")
+            else:
+                st.error("No resumes were successfully processed")
+
+# New function for resume management dashboard
+def show_resume_dashboard():
+    """Display dashboard for managing multiple resumes"""
+    st.markdown("<h2 style='color: var(--accent);'>Resume Management Dashboard</h2>", unsafe_allow_html=True)
+    
+    if not st.session_state.uploaded_resumes:
+        st.info("No resumes uploaded yet. Use the upload section to add resumes.")
+        return
+    
+    # Sorting controls
+    col1, col2, col3 = st.columns([2, 2, 1])
+    with col1:
+        st.session_state.sort_criteria = st.selectbox(
+            "Sort by",
+            ["upload_time", "name", "size", "page_count", "word_count"],
+            format_func=lambda x: {
+                "upload_time": "Upload Time",
+                "name": "File Name",
+                "size": "File Size",
+                "page_count": "Page Count",
+                "word_count": "Word Count"
+            }[x]
+        )
+    with col2:
+        st.session_state.sort_order = st.selectbox(
+            "Order",
+            ["desc", "asc"],
+            format_func=lambda x: "Descending" if x == "desc" else "Ascending"
+        )
+    with col3:
+        if st.button("Refresh View"):
+            st.rerun()
+    
+    # Apply sorting
+    reverse_order = st.session_state.sort_order == "desc"
+    sorted_resumes = sorted(
+        st.session_state.uploaded_resumes,
+        key=lambda x: x.get("metadata", {}).get(st.session_state.sort_criteria, x.get(st.session_state.sort_criteria, "")),
+        reverse=reverse_order
+    )
+    
+    # Display resume cards
+    for idx, resume in enumerate(sorted_resumes):
+        with st.expander(f"{resume['name']} - {resume['upload_time']}", expanded=False):
+            cols = st.columns([3, 1, 1])
+            with cols[0]:
+                st.markdown(f"""
+                **Metadata:**
+                - Pages: {resume['metadata']['page_count']}
+                - Words: {resume['metadata']['word_count']}
+                - Sections: {', '.join(resume['metadata']['sections'][:3])}{'...' if len(resume['metadata']['sections']) > 3 else ''}
+                """)
+                
+                # Tags management
+                new_tag = st.text_input(
+                    "Add tag",
+                    key=f"tag_input_{resume['id']}",
+                    placeholder="e.g. 'Engineer', 'Entry-level'"
+                )
+                if new_tag and st.button("Add", key=f"add_tag_{resume['id']}"):
+                    if new_tag not in st.session_state.resume_tags[resume['id']]:
+                        st.session_state.resume_tags[resume['id']].append(new_tag)
+                        st.rerun()
+                
+                if st.session_state.resume_tags[resume['id']]:
+                    st.markdown("**Tags:** " + ", ".join([
+                        f"`{tag}`" for tag in st.session_state.resume_tags[resume['id']]
+                    ]))
+            
+            with cols[1]:
+                if st.button("Analyze", key=f"analyze_{resume['id']}"):
+                    st.session_state.current_resume_index = next(
+                        i for i, r in enumerate(st.session_state.uploaded_resumes) 
+                        if r['id'] == resume['id']
+                    )
+                    st.session_state.extracted_text = resume['extracted_data']
+                    st.rerun()
+            
+            with cols[2]:
+                if st.button("Delete", key=f"delete_{resume['id']}"):
+                    st.session_state.uploaded_resumes = [
+                        r for r in st.session_state.uploaded_resumes 
+                        if r['id'] != resume['id']
+                    ]
+                    st.rerun()
+    
+    # Bulk actions
+    st.markdown("---")
+    st.markdown("<h4>Bulk Actions</h4>", unsafe_allow_html=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Analyze All Resumes", help="This may take some time"):
+            with st.spinner("Analyzing all resumes..."):
+                for resume in st.session_state.uploaded_resumes:
+                    if not resume['analysis']:
+                        try:
+                            client = get_groq_client()
+                            prompt = generate_prompt(
+                                resume['extracted_data']["text"],
+                                domain=st.session_state.domain,
+                                language=st.session_state.language
+                            )
+                            
+                            response = client.chat.completions.create(
+                                model="llama3-70b-8192",
+                                messages=[
+                                    {"role": "system", "content": "You are an expert resume reviewer."},
+                                    {"role": "user", "content": prompt}
+                                ],
+                                temperature=0.7,
+                                max_tokens=2000
+                            )
+                            
+                            feedback = response.choices[0].message.content
+                            summary_info = extract_summary_info(feedback)
+                            resume['analysis'] = summary_info
+                            
+                        except Exception as e:
+                            logger.error(f"Failed to analyze {resume['name']}: {str(e)}")
+                
+                st.success("Bulk analysis completed!")
+    with col2:
+        if st.button("Clear All Resumes", type="secondary"):
+            st.session_state.uploaded_resumes = []
+            st.session_state.resume_tags = defaultdict(list)
+            st.rerun()
+
+# New function for candidate comparison
+# Update the candidate comparison function
+def show_candidate_comparison():
+    """Display comparison view for multiple resumes with enhanced ATS score handling"""
+    if len(st.session_state.uploaded_resumes) < 2:
+        st.info("Upload at least 2 resumes to enable comparison")
+        return
+    
+    st.markdown("<h2 style='color: var(--accent);'>Candidate Comparison</h2>", unsafe_allow_html=True)
+    
+    # Select resumes to compare with tag filtering
+    st.markdown("### Filter Resumes by Tags")
+    all_tags = sorted({tag for tags in st.session_state.resume_tags.values() for tag in tags})
+    selected_tags = st.multiselect(
+        "Filter by tags (optional)",
+        all_tags,
+        key="tag_filter"
+    )
+    
+    # Get filtered resume options
+    filtered_resumes = [
+        r for r in st.session_state.uploaded_resumes
+        if not selected_tags or any(tag in st.session_state.resume_tags[r['id']] for tag in selected_tags)
+    ]
+    
+    if not filtered_resumes:
+        st.warning("No resumes match the selected tags")
+        return
+    
+    resume_options = [r['name'] for r in filtered_resumes]
+    selected_resumes = st.multiselect(
+        "Select resumes to compare (2-5)",
+        resume_options,
+        default=resume_options[:min(5, len(resume_options))],
+        key="compare_select"
+    )
+    
+    if len(selected_resumes) < 2:
+        st.warning("Please select at least 2 resumes to compare")
+        return
+    
+    selected_data = [
+        r for r in filtered_resumes 
+        if r['name'] in selected_resumes
+    ]
+    
+    # Comparison metrics with improved ATS score handling
+    metrics = ["Word Count", "Page Count", "Sections", "Rating", "ATS Score", "Last Analyzed"]
+    comparison_data = []
+    
+    for resume in selected_data:
+        # Handle ATS score conversion safely
+        try:
+            ats_score = float(resume['analysis']['ats_score']) if resume['analysis'] and resume['analysis']['ats_score'] and resume['analysis']['ats_score'] != "N/A" else 0
+        except (TypeError, ValueError):
+            ats_score = 0
+            
+        # Handle rating conversion safely
+        try:
+            rating = float(resume['analysis']['rating']) if resume['analysis'] and resume['analysis']['rating'] and resume['analysis']['rating'] != "N/A" else 0
+        except (TypeError, ValueError):
+            rating = 0
+            
+        entry = {
+            "Name": resume['name'],
+            "Word Count": resume['metadata']['word_count'],
+            "Page Count": resume['metadata']['page_count'],
+            "Sections": len(resume['metadata']['sections']),
+            "Rating": rating,
+            "ATS Score": ats_score,
+            "Last Analyzed": resume['analysis'].get('timestamp', "Never") if resume.get('analysis') else "Never",
+            "Tags": ", ".join(st.session_state.resume_tags[resume['id']]) or "None"
+        }
+        comparison_data.append(entry)
+    
+    # Create DataFrame for comparison
+    df = pd.DataFrame(comparison_data)
+    
+    # Display comparison table with improved formatting
+    st.markdown("### Comparison Table")
+    st.dataframe(
+        df.set_index("Name"),
+        use_container_width=True,
+        column_config={
+            "Rating": st.column_config.ProgressColumn(
+                "Rating",
+                help="Overall resume rating (0-10)",
+                format="%.1f",
+                min_value=0,
+                max_value=10
+            ),
+            "ATS Score": st.column_config.ProgressColumn(
+                "ATS Score",
+                help="ATS compatibility score (0-100)",
+                format="%.1f",
+                min_value=0,
+                max_value=100
+            ),
+            "Tags": st.column_config.TextColumn(
+                "Tags",
+                help="User-assigned tags for categorization"
+            )
+        }
+    )
+    
+    # Add download button for comparison data
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="📥 Download Comparison Data",
+        data=csv,
+        file_name="resume_comparison.csv",
+        mime="text/csv"
+    )
+    
+    # Visualizations with tabs
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Ratings & ATS", "📈 Word Count", "📑 Sections", "📌 Detailed View"])
+    
+    with tab1:
+        col1, col2 = st.columns(2)
+        with col1:
+            fig = px.bar(
+                df,
+                x="Name",
+                y="Rating",
+                title="Resume Ratings Comparison",
+                color="Rating",
+                color_continuous_scale="Teal",
+                text="Rating"
+            )
+            fig.update_traces(texttemplate='%{text:.1f}', textposition='outside')
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            fig = px.bar(
+                df,
+                x="Name",
+                y="ATS Score",
+                title="ATS Scores Comparison",
+                color="ATS Score",
+                color_continuous_scale="Blues",
+                text="ATS Score"
+            )
+            fig.update_traces(texttemplate='%{text:.1f}', textposition='outside')
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Combined radar chart
+        fig = px.line_polar(
+            df, 
+            r=["Rating", "ATS Score"],
+            theta=["Rating", "ATS Score"],
+            line_close=True,
+            title="Combined Metrics Radar Chart"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with tab2:
+        col1, col2 = st.columns(2)
+        with col1:
+            fig = px.pie(
+                df,
+                names="Name",
+                values="Word Count",
+                title="Word Count Distribution",
+                hole=0.4
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            fig = px.bar(
+                df,
+                x="Name",
+                y="Word Count",
+                title="Word Count Comparison",
+                color="Word Count",
+                text="Word Count"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+    
+    with tab3:
+        # Create section comparison heatmap
+        all_sections = set()
+        for resume in selected_data:
+            all_sections.update(resume['metadata']['sections'])
+        
+        section_data = []
+        for section in sorted(all_sections):
+            section_entry = {"Section": section}
+            for resume in selected_data:
+                section_entry[resume['name']] = 1 if section in resume['metadata']['sections'] else 0
+            section_data.append(section_entry)
+        
+        section_df = pd.DataFrame(section_data).set_index("Section")
+        
+        # Display as heatmap
+        fig = px.imshow(
+            section_df,
+            labels=dict(x="Resume", y="Section", color="Present"),
+            title="Section Presence Heatmap",
+            color_continuous_scale="Blues"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with tab4:
+        # Detailed view with expandable sections
+        for resume in selected_data:
+            with st.expander(f"📄 {resume['name']} - Rating: {resume['analysis']['rating'] if resume['analysis'] else 'Not Analyzed'}", expanded=False):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("**Basic Info**")
+                    st.markdown(f"""
+                    - **Uploaded:** {resume['upload_time']}
+                    - **Pages:** {resume['metadata']['page_count']}
+                    - **Words:** {resume['metadata']['word_count']}
+                    - **Sections:** {', '.join(resume['metadata']['sections'][:5])}{'...' if len(resume['metadata']['sections']) > 5 else ''}
+                    """)
+                    
+                    if st.session_state.resume_tags[resume['id']]:
+                        st.markdown("**Tags:** " + ", ".join([
+                            f"`{tag}`" for tag in st.session_state.resume_tags[resume['id']]
+                        ]))
+                
+                with col2:
+                    if resume['analysis']:
+                        st.markdown("**Analysis Results**")
+                        st.markdown(f"""
+                        - **Rating:** {resume['analysis']['rating']}
+                        - **ATS Score:** {resume['analysis']['ats_score'] if resume['analysis']['ats_score'] else 'N/A'}
+                        - **Suggested Role:** {resume['analysis']['job_suggestion']}
+                        """)
+                
+                if resume['analysis']:
+                    show_feedback = st.toggle("🔍 Show Full Analysis", key=f"toggle_{resume['id']}")
+                    if show_feedback:
+                        st.markdown(resume['analysis']['raw_feedback'])
+
+                
+                if st.button(f"Re-analyze {resume['name']}", key=f"reanalyze_{resume['id']}"):
+                    with st.spinner(f"Analyzing {resume['name']}..."):
+                        try:
+                            client = get_groq_client()
+                            prompt = generate_prompt(
+                                resume['extracted_data']["text"],
+                                domain=st.session_state.domain,
+                                language=st.session_state.language
+                            )
+                            
+                            response = client.chat.completions.create(
+                                model="llama3-70b-8192",
+                                messages=[
+                                    {"role": "system", "content": "You are an expert resume reviewer."},
+                                    {"role": "user", "content": prompt}
+                                ],
+                                temperature=0.7,
+                                max_tokens=2000
+                            )
+                            
+                            feedback = response.choices[0].message.content
+                            summary_info = extract_summary_info(feedback)
+                            summary_info['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M")
+                            resume['analysis'] = summary_info
+                            st.success("Re-analysis complete!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Failed to re-analyze: {str(e)}")
 
 # Enhanced file validation with content checking
 def validate_file(uploaded_file) -> Tuple[bool, str]:
@@ -831,6 +1291,11 @@ def show_upload_section():
 
 def show_section_analysis(extracted_data):
     """Display section analysis results"""
+    if st.session_state.get("section_analysis_shown"):
+        return  # skip if already shown
+
+    st.session_state["section_analysis_shown"] = True
+
     with st.expander("Section Analysis", expanded=True):
         cols = st.columns(2)
         if extracted_data["sections"]:
@@ -851,7 +1316,7 @@ def show_analysis_results(feedback_data):
     
     with tab1:
         st.markdown("<h3 style='color: var(--accent);'>Quick Summary</h3>", unsafe_allow_html=True)
-        
+    
         # Handle rating display with fallbacks
         rating = feedback_data["rating"]
         if rating == "N/A":
@@ -905,11 +1370,11 @@ def show_analysis_results(feedback_data):
                         {weaknesses_html}
                     </div>
                     """, unsafe_allow_html=True)
-    
+
     with tab2:
         st.markdown("<h3 style='color: var(--accent);'>Detailed Feedback</h3>", unsafe_allow_html=True)
         st.markdown(feedback_data["raw_feedback"])
-    
+
     with tab3:
         st.markdown("<h3 style='color: var(--accent);'>ATS Optimization</h3>", unsafe_allow_html=True)
         
@@ -943,7 +1408,7 @@ def show_analysis_results(feedback_data):
                     st.markdown(f"<li>{tip}</li>", unsafe_allow_html=True)
                 
                 st.markdown("</ul></div>", unsafe_allow_html=True)
-    
+
     with tab4:
         st.markdown("<h3 style='color: var(--accent);'>Actionable Recommendations</h3>", unsafe_allow_html=True)
         
@@ -1003,32 +1468,30 @@ def show_analysis_results(feedback_data):
                 st.markdown(f"<li>{note}</li>", unsafe_allow_html=True)
             
             st.markdown("</ul></div>", unsafe_allow_html=True)
-    
-    with tab5:  # Job Matches tab
+
+    with tab5:  # Job Matches tab - ONLY place job recommendations appear
         st.markdown("<h3 style='color: var(--accent);'>Real Job Recommendations</h3>", unsafe_allow_html=True)
-    
-    if not st.session_state.job_matches:
-        with st.spinner("Searching for matching jobs..."):
-            st.session_state.job_matches = get_job_recommendations(
-                st.session_state.extracted_text["text"],
-                domain=st.session_state.domain
-            )
-    
-    if st.session_state.job_matches:
-        for job in st.session_state.job_matches:
-            st.markdown(f"""
-            <div class="job-card">
-                <h4>{job['title']}</h4>
-                <p><strong>{job['company']}</strong> • {job['location']}</p>
-                <p>{job['description'][:200]}...</p>
-                <p>Salary: {job.get('salary', 'Not specified')}</p>
-                <p class="job-match-score">Match Score: {job['match_score']}%</p>
-                <a href="{job['url']}" target="_blank" class="stButton">View Job</a>
-            </div>
-            """, unsafe_allow_html=True)
-    else:
-            st.warning("No jobs found. Try broadening your search criteria.")
-            
+        
+        if not st.session_state.job_matches:
+            with st.spinner("Searching for matching jobs..."):
+                st.session_state.job_matches = get_job_recommendations(
+                    st.session_state.extracted_text["text"],
+                    domain=st.session_state.domain
+                )
+        
+        if st.session_state.job_matches:
+            for job in st.session_state.job_matches:
+                st.markdown(f"""
+                <div class="job-card">
+                    <h4>{job['title']}</h4>
+                    <p><strong>{job['company']}</strong> • {job['location']}</p>
+                    <p>{job['description'][:200]}...</p>
+                    <p>Salary: {job.get('salary', 'Not specified')}</p>
+                    <p class="job-match-score">Match Score: {job['match_score']}%</p>
+                    <a href="{job['url']}" target="_blank" class="stButton">View Job</a>
+                </div>
+                """, unsafe_allow_html=True)
+                
             # User feedback on recommendations
             st.markdown("### Were these recommendations helpful?")
             col1, col2, col3 = st.columns(3)
@@ -1044,9 +1507,9 @@ def show_analysis_results(feedback_data):
                 if st.button("🤔 Somewhat", key="job_feedback_somewhat"):
                     st.session_state.user_feedback["job_recommendations"] = "neutral"
                     st.info("Thanks for your feedback!")
-                else:
-                    st.warning("No job matches found. Try adjusting your search criteria.")
-    
+        else:
+            st.warning("No job matches found. Try adjusting your search criteria.")
+
     with tab6:
         st.markdown("<h3 style='color: var(--accent);'>Resume History</h3>", unsafe_allow_html=True)
         
@@ -1094,6 +1557,160 @@ def show_analysis_results(feedback_data):
     with col3:
         if st.button("✉️ Email Me This Feedback", use_container_width=True):
             st.info("This feature would connect to your email service in a production app")
+
+def show_ats_explanation(score):
+    """Display detailed explanation of ATS score"""
+    with st.expander("ℹ️ About ATS Scores"):
+        st.markdown("""
+        **Applicant Tracking System (ATS) Score Explained:**
+        
+        - **90-100**: Excellent optimization, likely to pass most ATS filters
+        - **75-89**: Good optimization, should pass many ATS filters
+        - **60-74**: Fair optimization, may need improvements
+        - **Below 60**: Poor optimization, unlikely to pass ATS filters
+        
+        **Key Factors Affecting ATS Score:**
+        - Keyword matching with job description
+        - Proper section headers
+        - Standard formatting
+        - Avoidance of complex layouts/tables
+        - Appropriate length
+        """)
+        
+        if score is not None:
+            if score >= 90:
+                st.success("This resume is well-optimized for ATS systems!")
+            elif score >= 75:
+                st.info("This resume is reasonably well-optimized but could be improved")
+            elif score >= 60:
+                st.warning("This resume needs optimization for better ATS performance")
+            else:
+                st.error("This resume needs significant optimization for ATS systems")
+
+def calculate_resume_similarity(resume1, resume2):
+    """Calculate similarity between two resumes"""
+    vectorizer = TfidfVectorizer()
+    tfidf = vectorizer.fit_transform([resume1, resume2])
+    return cosine_similarity(tfidf[0:1], tfidf[1:2])[0][0] * 100
+
+def show_similarity_analysis(selected_data):
+    """Display similarity matrix for selected resumes"""
+    st.markdown("### Resume Similarity Analysis")
+    
+    # Create similarity matrix
+    names = [r['name'] for r in selected_data]
+    similarity_matrix = np.zeros((len(selected_data), len(selected_data)))
+    
+    for i in range(len(selected_data)):
+        for j in range(len(selected_data)):
+            if i == j:
+                similarity_matrix[i][j] = 100
+            elif i < j:
+                similarity = calculate_resume_similarity(
+                    selected_data[i]['extracted_data']['text'],
+                    selected_data[j]['extracted_data']['text']
+                )
+                similarity_matrix[i][j] = similarity
+                similarity_matrix[j][i] = similarity
+    
+    # Display as heatmap
+    fig = px.imshow(
+        similarity_matrix,
+        labels=dict(x="Resume", y="Resume", color="Similarity"),
+        x=names,
+        y=names,
+        text_auto=".1f",
+        color_continuous_scale="Viridis",
+        title="Resume Similarity Matrix (%)"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+def generate_quality_scorecard(resume):
+    """Generate a visual quality scorecard for a resume"""
+    if not resume['analysis']:
+        return None
+    
+    scores = {
+        "Content": float(resume['analysis']['rating']) * 10,
+        "ATS": float(resume['analysis']['ats_score']) if resume['analysis']['ats_score'] else 0,
+        "Structure": min(100, len(resume['metadata']['sections']) * 15),
+        "Clarity": min(100, resume['metadata']['word_count'] / 10)
+    }
+    
+    fig = go.Figure()
+    
+    fig.add_trace(go.Scatterpolar(
+        r=list(scores.values()),
+        theta=list(scores.keys()),
+        fill='toself',
+        name='Quality Score'
+    ))
+    
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 100]
+            )),
+        showlegend=False,
+        title="Resume Quality Scorecard"
+    )
+    
+    return fig
+
+def show_job_description_matching(selected_data):
+    """Show how well resumes match a specific job description"""
+    st.markdown("### Job Description Matching")
+    
+    job_desc = st.text_area(
+        "Paste a job description to compare against",
+        height=200,
+        key="job_desc_comparison"
+    )
+    
+    if job_desc and len(job_desc) > 50:
+        matches = []
+        for resume in selected_data:
+            match_score = calculate_match_score(
+                resume['extracted_data']['text'],
+                job_desc
+            )
+            matches.append({
+                "Name": resume['name'],
+                "Match Score": match_score,
+                "Rating": float(resume['analysis']['rating']) if resume['analysis'] and resume['analysis']['rating'] != "N/A" else 0,
+                "ATS": float(resume['analysis']['ats_score']) if resume['analysis'] and resume['analysis']['ats_score'] else 0
+            })
+        
+        match_df = pd.DataFrame(matches).set_index("Name")
+        
+        # Display results
+        col1, col2 = st.columns(2)
+        with col1:
+            st.dataframe(
+                match_df,
+                use_container_width=True,
+                column_config={
+                    "Match Score": st.column_config.ProgressColumn(
+                        "Match %",
+                        format="%.1f",
+                        min_value=0,
+                        max_value=100
+                    )
+                }
+            )
+        
+        with col2:
+            fig = px.bar(
+                match_df.reset_index(),
+                x="Name",
+                y="Match Score",
+                title="Job Description Match Scores",
+                color="Match Score",
+                text="Match Score"
+            )
+            fig.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+            st.plotly_chart(fig, use_container_width=True)
 
 def show_resume_templates():
     """Display resume templates for different industries"""
@@ -1213,7 +1830,7 @@ def main():
         st.markdown("<small>Your data is processed securely and not stored permanently.</small>", unsafe_allow_html=True)
 
     # Main tabs
-    tab1, tab2 = st.tabs(["📄 Analyze Resume", "💡 Resume Templates"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📄 Analyze Resume", "📂 Resume Manager", "👥 Compare Candidates", "💡 Templates"])    
     
     with tab1:
         # Upload and analysis flow
@@ -1231,6 +1848,16 @@ def main():
                     st.error("Failed to extract text from the file")
                     st.stop()
                 
+                st.session_state.extracted_text = extracted_data
+                word_count = len(extracted_data["text"].split())
+                
+                if word_count < 50:
+                    st.warning(f"The resume seems very short ({word_count} words). Please check if text was properly extracted.")
+                elif word_count > 1000:
+                    st.info(f"Processing large resume ({word_count} words). This may take a moment...")
+
+                show_section_analysis(extracted_data)
+
                 # Detect language if not English
                 if st.session_state.language == "auto":
                     detected_lang = detect_language(extracted_data["text"])
@@ -1335,6 +1962,17 @@ def main():
             show_analysis_results(st.session_state.feedback_data)
     
     with tab2:
+        # New resume management functionality
+        handle_multi_file_upload()
+        st.markdown("---")
+        show_resume_dashboard()
+    
+    with tab3:
+        # New candidate comparison functionality
+        show_candidate_comparison()
+    
+    with tab4:
+        # Existing templates functionality
         show_resume_templates()
 
 if __name__ == "__main__":
