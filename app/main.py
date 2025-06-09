@@ -378,15 +378,19 @@ def show_resume_dashboard():
                 - Sections: {', '.join(resume['metadata']['sections'][:3])}{'...' if len(resume['metadata']['sections']) > 3 else ''}
                 """)
                 
-                # Tags management
+                # Tags management - using both index and ID for unique key
+                tag_key = f"tag_input_{idx}_{resume['id']}"
                 new_tag = st.text_input(
                     "Add tag",
-                    key=f"tag_input_{resume['id']}",
+                    key=tag_key,
                     placeholder="e.g. 'Engineer', 'Entry-level'"
                 )
-                if new_tag and st.button("Add", key=f"add_tag_{resume['id']}"):
+                if new_tag and st.button(f"Add Tag {idx}", key=f"add_tag_{idx}_{resume['id']}"):
                     if new_tag not in st.session_state.resume_tags[resume['id']]:
                         st.session_state.resume_tags[resume['id']].append(new_tag)
+                        # Clear the input field by removing the key from session state
+                        if tag_key in st.session_state:
+                            del st.session_state[tag_key]
                         st.rerun()
                 
                 if st.session_state.resume_tags[resume['id']]:
@@ -395,7 +399,7 @@ def show_resume_dashboard():
                     ]))
             
             with cols[1]:
-                if st.button("Analyze", key=f"analyze_{resume['id']}"):
+                if st.button("Analyze", key=f"analyze_{idx}_{resume['id']}"):
                     st.session_state.current_resume_index = next(
                         i for i, r in enumerate(st.session_state.uploaded_resumes) 
                         if r['id'] == resume['id']
@@ -404,7 +408,7 @@ def show_resume_dashboard():
                     st.rerun()
             
             with cols[2]:
-                if st.button("Delete", key=f"delete_{resume['id']}"):
+                if st.button("Delete", key=f"delete_{idx}_{resume['id']}"):
                     st.session_state.uploaded_resumes = [
                         r for r in st.session_state.uploaded_resumes 
                         if r['id'] != resume['id']
@@ -453,89 +457,184 @@ def show_resume_dashboard():
             st.rerun()
 
 # New function for candidate comparison
-# Update the candidate comparison function
 def show_candidate_comparison():
-    """Display comparison view for multiple resumes with enhanced ATS score handling"""
-    if len(st.session_state.uploaded_resumes) < 2:
-        st.info("Upload at least 2 resumes to enable comparison")
-        return
+    """Display comparison view for multiple resumes with comprehensive error handling"""
     
+    # Initial checks with proper error handling
+    try:
+        if not hasattr(st.session_state, 'uploaded_resumes') or len(st.session_state.get('uploaded_resumes', [])) < 2:
+            st.info("Upload at least 2 resumes to enable comparison")
+            return
+    except Exception as e:
+        st.error(f"Error checking resume count: {str(e)}")
+        return
+
     st.markdown("<h2 style='color: var(--accent);'>Candidate Comparison</h2>", unsafe_allow_html=True)
     
-    # Select resumes to compare with tag filtering
-    st.markdown("### Filter Resumes by Tags")
-    all_tags = sorted({tag for tags in st.session_state.resume_tags.values() for tag in tags})
+    # Safely get tags with comprehensive None checking
+    all_tags = []
+    try:
+        if hasattr(st.session_state, 'resume_tags'):
+            all_tags = sorted({tag for tags in st.session_state.resume_tags.values() 
+                             for tag in (tags if isinstance(tags, list) else [])})
+    except Exception:
+        all_tags = []
+
     selected_tags = st.multiselect(
         "Filter by tags (optional)",
         all_tags,
         key="tag_filter"
     )
-    
-    # Get filtered resume options
-    filtered_resumes = [
-        r for r in st.session_state.uploaded_resumes
-        if not selected_tags or any(tag in st.session_state.resume_tags[r['id']] for tag in selected_tags)
-    ]
-    
+
+    # Safely build filtered resumes list
+    filtered_resumes = []
+    try:
+        for r in st.session_state.get('uploaded_resumes', []):
+            try:
+                if not isinstance(r, dict):
+                    continue
+                    
+                resume_id = r.get('id', '')
+                resume_tags = st.session_state.resume_tags.get(resume_id, []) if hasattr(st.session_state, 'resume_tags') else []
+                
+                if not selected_tags or any(tag in resume_tags for tag in selected_tags):
+                    filtered_resumes.append(r)
+            except Exception:
+                continue
+    except Exception as e:
+        st.error(f"Error filtering resumes: {str(e)}")
+        filtered_resumes = []
+
     if not filtered_resumes:
-        st.warning("No resumes match the selected tags")
+        st.warning("No resumes available for comparison")
         return
-    
-    resume_options = [r['name'] for r in filtered_resumes]
+
+    # Safely get resume names
+    resume_options = []
+    for r in filtered_resumes:
+        try:
+            name = r.get('name', 'Unnamed Resume')
+            if not isinstance(name, str):
+                name = 'Unnamed Resume'
+            resume_options.append(name)
+        except Exception:
+            resume_options.append('Unnamed Resume')
+
     selected_resumes = st.multiselect(
         "Select resumes to compare (2-5)",
         resume_options,
         default=resume_options[:min(5, len(resume_options))],
         key="compare_select"
     )
-    
+
     if len(selected_resumes) < 2:
         st.warning("Please select at least 2 resumes to compare")
         return
-    
-    selected_data = [
-        r for r in filtered_resumes 
-        if r['name'] in selected_resumes
-    ]
-    
-    # Comparison metrics with improved ATS score handling
-    metrics = ["Word Count", "Page Count", "Sections", "Rating", "ATS Score", "Last Analyzed"]
+
+    # Build selected_data with comprehensive error handling
+    selected_data = []
+    for r in filtered_resumes:
+        try:
+            if not isinstance(r, dict):
+                continue
+                
+            name = r.get('name', '')
+            if not isinstance(name, str):
+                continue
+                
+            if name in selected_resumes:
+                selected_data.append(r)
+        except Exception:
+            continue
+
+    def validate_resume(resume):
+        required = ['name', 'metadata']
+        return all(key in resume for key in required)
+
+    valid_resumes = [r for r in selected_data if validate_resume(r)] if selected_data else []
+
+    # Build comparison data with atomic error handling
     comparison_data = []
-    
     for resume in selected_data:
-        # Handle ATS score conversion safely
         try:
-            ats_score = float(resume['analysis']['ats_score']) if resume['analysis'] and resume['analysis']['ats_score'] and resume['analysis']['ats_score'] != "N/A" else 0
-        except (TypeError, ValueError):
-            ats_score = 0
+            # Safely get all components with nested protection
+            resume_dict = resume if isinstance(resume, dict) else {}
             
-        # Handle rating conversion safely
-        try:
-            rating = float(resume['analysis']['rating']) if resume['analysis'] and resume['analysis']['rating'] and resume['analysis']['rating'] != "N/A" else 0
-        except (TypeError, ValueError):
+            # Get analysis data with verification
+            analysis = resume_dict.get('analysis', {}) if isinstance(resume_dict.get('analysis'), dict) else {}
+            
+            # Get metadata with verification
+            metadata = resume_dict.get('metadata', {}) if isinstance(resume_dict.get('metadata'), dict) else {
+                'word_count': 0,
+                'page_count': 0,
+                'sections': []
+            }
+
+            # Get rating with verification
             rating = 0
+            if analysis and 'rating' in analysis and analysis['rating'] not in [None, 'N/A', '']:
+                try:
+                    rating = float(analysis['rating'])
+                except (ValueError, TypeError):
+                    rating = 0
+
+            # Get ATS score with verification
+            ats_score = 0
+            if analysis and 'ats_score' in analysis and analysis['ats_score'] not in [None, 'N/A', '']:
+                try:
+                    ats_score = float(analysis['ats_score'])
+                except (ValueError, TypeError):
+                    ats_score = 0
+
+            # Get timestamp with verification
+            last_analyzed = 'Never'
+            if analysis and 'timestamp' in analysis and analysis['timestamp'] not in [None, '']:
+                last_analyzed = analysis['timestamp']
+            elif analysis and 'raw_feedback' in analysis and isinstance(analysis['raw_feedback'], str):
+                # Try to extract timestamp from raw feedback
+                try:
+                    time_match = re.search(r'analyzed on (.*?)\n', analysis['raw_feedback'])
+                    if time_match:
+                        last_analyzed = time_match.group(1)
+                except:
+                    pass        
             
-        entry = {
-            "Name": resume['name'],
-            "Word Count": resume['metadata']['word_count'],
-            "Page Count": resume['metadata']['page_count'],
-            "Sections": len(resume['metadata']['sections']),
-            "Rating": rating,
-            "ATS Score": ats_score,
-            "Last Analyzed": resume['analysis'].get('timestamp', "Never") if resume.get('analysis') else "Never",
-            "Tags": ", ".join(st.session_state.resume_tags[resume['id']]) or "None"
-        }
-        comparison_data.append(entry)
-    
-    # Create DataFrame for comparison
-    df = pd.DataFrame(comparison_data)
-    
-    # Display comparison table with improved formatting
-    st.markdown("### Comparison Table")
-    st.dataframe(
-        df.set_index("Name"),
-        use_container_width=True,
-        column_config={
+            # Get resume ID safely
+            resume_id = resume.get('id', '')
+            
+            # Build entry with verified data
+            entry = {
+                "Name": str(resume.get('name', 'Unnamed Resume')),
+                "Word Count": int(metadata.get('word_count', 0)),
+                "Page Count": int(metadata.get('page_count', 0)),
+                "Sections": len(metadata.get('sections', [])) if isinstance(metadata.get('sections'), list) else 0,
+                "Rating": float(rating) if rating != "N/A" else 0,
+                "ATS Score": float(ats_score) if ats_score != "N/A" else 0,
+                "Last Analyzed": last_analyzed,
+                "Tags": ", ".join(map(str, st.session_state.resume_tags.get(resume_id, []))) if hasattr(st.session_state, 'resume_tags') else "None"
+            }
+            comparison_data.append(entry)
+
+        except Exception as e:
+            logger.error(f"Skipping resume {resume.get('name', 'unnamed')} due to: {str(e)}")
+            logger.debug(f"Problematic resume data: {resume}")
+            continue
+
+    # Display results with error boundary
+    try:
+        if not comparison_data:
+            st.warning("No valid resume data to compare")
+            return
+            
+        df = pd.DataFrame(comparison_data)
+        
+        # Add analysis status column
+        df['Status'] = df.apply(lambda row: 
+            "Analyzed" if row['Last Analyzed'] != 'Never' else "Not Analyzed", 
+            axis=1)
+
+        # Configure columns with safe defaults
+        column_config = {
             "Rating": st.column_config.ProgressColumn(
                 "Rating",
                 help="Overall resume rating (0-10)",
@@ -550,21 +649,57 @@ def show_candidate_comparison():
                 min_value=0,
                 max_value=100
             ),
+            "Last Analyzed": st.column_config.DatetimeColumn(
+                "Last Analyzed",
+                help="When this resume was last analyzed"
+            ),
+            "Status": st.column_config.TextColumn(
+                "Analysis Status",
+                help="Whether this resume has been analyzed"
+            ),
             "Tags": st.column_config.TextColumn(
                 "Tags",
                 help="User-assigned tags for categorization"
             )
         }
-    )
+        
+        st.markdown("### Comparison Table")
+        st.dataframe(
+            df.set_index("Name"),
+            use_container_width=True,
+            column_config=column_config
+        )
+        
+        # Show analysis buttons for unanalyzed resumes
+        if 'Never' in df['Last Analyzed'].values:
+            st.markdown("### Analyze Resumes")
+            unanalyzed_names = df[df['Last Analyzed'] == 'Never'].index.tolist()
+            
+            for name in unanalyzed_names:
+                if st.button(f"Analyze {name}"):
+                    try:
+                        resume = next(r for r in selected_data if r.get('name') == name)
+                        st.session_state.current_resume_index = next(
+                            i for i, r in enumerate(st.session_state.uploaded_resumes)
+                            if r.get('id') == resume.get('id')
+                        )
+                        st.session_state.extracted_text = resume.get('extracted_data')
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Couldn't load resume: {str(e)}")
+
+    except Exception as e:
+        st.error(f"Error displaying comparison results: {str(e)}")
     
     # Add download button for comparison data
-    csv = df.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="📥 Download Comparison Data",
-        data=csv,
-        file_name="resume_comparison.csv",
-        mime="text/csv"
-    )
+    if not df.empty:
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download Comparison Data",
+            data=csv,
+            file_name="resume_comparison.csv",
+            mime="text/csv"
+        )
     
     # Visualizations with tabs
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Ratings & ATS", "📈 Word Count", "📑 Sections", "📌 Detailed View"])
@@ -634,13 +769,16 @@ def show_candidate_comparison():
         # Create section comparison heatmap
         all_sections = set()
         for resume in selected_data:
-            all_sections.update(resume['metadata']['sections'])
+            try:
+                all_sections.update(resume.get('metadata', {}).get('sections', []))
+            except:
+                continue
         
         section_data = []
         for section in sorted(all_sections):
             section_entry = {"Section": section}
             for resume in selected_data:
-                section_entry[resume['name']] = 1 if section in resume['metadata']['sections'] else 0
+                section_entry[resume['name']] = 1 if section in resume.get('metadata', {}).get('sections', []) else 0
             section_data.append(section_entry)
         
         section_df = pd.DataFrame(section_data).set_index("Section")
@@ -657,43 +795,43 @@ def show_candidate_comparison():
     with tab4:
         # Detailed view with expandable sections
         for resume in selected_data:
-            with st.expander(f"📄 {resume['name']} - Rating: {resume['analysis']['rating'] if resume['analysis'] else 'Not Analyzed'}", expanded=False):
+            rating = resume.get('analysis', {}).get('rating', 'Not Analyzed') if resume.get('analysis') else 'Not Analyzed'
+            with st.expander(f"📄 {resume['name']} - Rating: {rating}", expanded=False):
                 col1, col2 = st.columns(2)
                 with col1:
                     st.markdown("**Basic Info**")
                     st.markdown(f"""
-                    - **Uploaded:** {resume['upload_time']}
-                    - **Pages:** {resume['metadata']['page_count']}
-                    - **Words:** {resume['metadata']['word_count']}
-                    - **Sections:** {', '.join(resume['metadata']['sections'][:5])}{'...' if len(resume['metadata']['sections']) > 5 else ''}
+                    - **Uploaded:** {resume.get('upload_time', 'Unknown')}
+                    - **Pages:** {resume.get('metadata', {}).get('page_count', 0)}
+                    - **Words:** {resume.get('metadata', {}).get('word_count', 0)}
+                    - **Sections:** {', '.join(resume.get('metadata', {}).get('sections', [])[:5])}{'...' if len(resume.get('metadata', {}).get('sections', [])) > 5 else ''}
                     """)
                     
-                    if st.session_state.resume_tags[resume['id']]:
+                    if st.session_state.resume_tags.get(resume.get('id', ''), []):
                         st.markdown("**Tags:** " + ", ".join([
-                            f"`{tag}`" for tag in st.session_state.resume_tags[resume['id']]
+                            f"`{tag}`" for tag in st.session_state.resume_tags.get(resume.get('id', ''), [])
                         ]))
                 
                 with col2:
-                    if resume['analysis']:
+                    if resume.get('analysis'):
                         st.markdown("**Analysis Results**")
                         st.markdown(f"""
-                        - **Rating:** {resume['analysis']['rating']}
-                        - **ATS Score:** {resume['analysis']['ats_score'] if resume['analysis']['ats_score'] else 'N/A'}
-                        - **Suggested Role:** {resume['analysis']['job_suggestion']}
+                        - **Rating:** {resume['analysis'].get('rating', 'N/A')}
+                        - **ATS Score:** {resume['analysis'].get('ats_score', 'N/A')}
+                        - **Suggested Role:** {resume['analysis'].get('job_suggestion', 'N/A')}
                         """)
                 
-                if resume['analysis']:
-                    show_feedback = st.toggle("🔍 Show Full Analysis", key=f"toggle_{resume['id']}")
+                if resume.get('analysis'):
+                    show_feedback = st.toggle("🔍 Show Full Analysis", key=f"toggle_{resume.get('id', '')}")
                     if show_feedback:
-                        st.markdown(resume['analysis']['raw_feedback'])
-
+                        st.markdown(resume['analysis'].get('raw_feedback', 'No analysis available'))
                 
-                if st.button(f"Re-analyze {resume['name']}", key=f"reanalyze_{resume['id']}"):
+                if st.button(f"Re-analyze {resume['name']}", key=f"reanalyze_{resume.get('id', '')}"):
                     with st.spinner(f"Analyzing {resume['name']}..."):
                         try:
                             client = get_groq_client()
                             prompt = generate_prompt(
-                                resume['extracted_data']["text"],
+                                resume.get('extracted_data', {}).get("text", ""),
                                 domain=st.session_state.domain,
                                 language=st.session_state.language
                             )
@@ -944,9 +1082,36 @@ def extract_summary_info(feedback: str) -> Dict:
         weaknesses = len(re.findall(r'Weakness:', feedback, re.IGNORECASE))
         rating = str(round(5 + (strengths - weaknesses) * 0.5, 1))
 
-    # Extract ATS score
-    ats_match = re.search(r'ATS compatibility score\s*(\d+)\s*-\s*(\d+)', feedback, re.IGNORECASE)
-    ats_score = ats_match.group(1) if ats_match else None
+    # Extract ATS score with more robust patterns
+    ats_score = "0"
+    ats_patterns = [
+        r'ATS\s*[Ss]core\s*:\s*(\d+)',  # "ATS Score: 85"
+        r'ATS\s*compatibility\s*:\s*(\d+)',  # "ATS compatibility: 85"
+        r'ATS\s*:\s*(\d+)',  # "ATS: 85"
+        r'ATS\s*[Ss]core\s*[iI]s\s*(\d+)',  # "ATS score is 85"
+        r'ATS\s*[Oo]ptimization.*?(\d+)\s*\/\s*100',  # "ATS Optimization... 85/100"
+        r'Estimated\s*ATS\s*Score\s*:\s*(\d+)'  # "Estimated ATS Score: 85"
+    ]
+
+    for pattern in ats_patterns:
+        match = re.search(pattern, feedback, re.IGNORECASE)
+        if match:
+            ats_score = match.group(1)
+            break
+
+     # Fallback: Look for any number followed by /100 in the ATS section
+    if ats_score == "0":
+        ats_section = re.search(r'(?:ATS|Applicant Tracking System).*?(?=\n###|\n\*\*|\n\n|$)', feedback, re.IGNORECASE | re.DOTALL)
+        if ats_section:
+            fallback_match = re.search(r'(\d+)\s*\/\s*100', ats_section.group(0))
+            if fallback_match:
+                ats_score = fallback_match.group(1)
+    
+    # Final fallback: Calculate from keywords if still not found
+    if ats_score == "0":
+        keyword_matches = len(re.findall(r'keyword', feedback, re.IGNORECASE))
+        section_matches = len(re.findall(r'section', feedback, re.IGNORECASE))
+        ats_score = str(min(100, keyword_matches * 5 + section_matches * 3))
 
     # Extract job suggestion
     job_match = re.search(
@@ -1050,7 +1215,8 @@ def extract_summary_info(feedback: str) -> Dict:
         "actions": actions,
         "soft_skills": soft_skills,
         "bias_notes": bias_notes,
-        "raw_feedback": feedback
+        "raw_feedback": feedback,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M")
     }
 
 # Get real-time job recommendations from Indeed API (mock implementation)

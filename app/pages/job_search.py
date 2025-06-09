@@ -92,8 +92,7 @@ def main():
 
         if jobs:
             st.success(f"✅ Found {len(jobs)} job openings")
-            st.write("📦 Sample Job Data:", jobs[0])  # Debug view: remove once confirmed
-
+            
             for job in jobs:
                 title = job.get("title", "N/A")
                 company = job.get("organization", "N/A")
